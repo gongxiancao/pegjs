@@ -215,7 +215,7 @@ ReturnStatement
 
 ExpressionStatement
   = _ ep:Expression EOS {
-     return ep;
+      return ep;
     }
 
 Expression
@@ -284,7 +284,6 @@ LogicalANDExpression
 LogicalANDOperator
   = "&&"
 
-
 BitwiseORExpression
   = head:BitwiseXORExpression
     tail:(_ BitwiseOROperator _ BitwiseXORExpression)*
@@ -321,47 +320,77 @@ EqualityOperator
   / "!="
 
 RelationalExpression
-  = head:ShiftExpression tail:(_ (">=" / "<=" / ">" / "<" / "===" / "!==") _ ShiftExpression)* {
-      return tail.reduce(function(result, element) {
-        return {type: 'BinaryExpression', operator: element[1], left: result, right: element[3]};
-      }, head);
-    }
+  = head:ShiftExpression tail:(_ RelationalOperator _ ShiftExpression)*
+    { return buildBinaryExpression(head, tail); }
+
+RelationalOperator
+  = "<="
+  / ">="
+  / $("<" !"<")
+  / $(">" !">")
 
 ShiftExpression
-  = head:AdditiveExpression tail:(_ ("<<" / ">>>" / ">>") _ AdditiveExpression)* {
-      return tail.reduce(function(result, element) {
-        return {type: 'BinaryExpression', operator: element[1], left: result, right: element[3]};
-      }, head);
-    }
+  = head:AdditiveExpression tail:(_ ShiftOperator _ AdditiveExpression)*
+    { return buildBinaryExpression(head, tail); }
+
+ShiftOperator
+  = $("<<"  !"=")
+  / $(">>>" !"=")
+  / $(">>"  !"=")
 
 AdditiveExpression
-  = head:MultiplicativeExpression tail:(_ ("+" / "-") _ MultiplicativeExpression)* {
-      return tail.reduce(function(result, element) {
-        return {type: 'BinaryExpression', operator: element[1], left: result, right: element[3]};
-      }, head);
-    }
+  = head:MultiplicativeExpression tail:(_ AdditiveOperator _ MultiplicativeExpression)*
+    { return buildBinaryExpression(head, tail); }
+
+AdditiveOperator
+  = $("+" ![+=])
+  / $("-" ![-=])
 
 MultiplicativeExpression
-  = head:UnaryExpression tail:(_ ("*" / "/" / "%") _ UnaryExpression)* {
-      return tail.reduce(function(result, element) {
-        return {type: 'BinaryExpression', operator: element[1], left: result, right: element[3]};
-      }, head);
-    }
+  = head:UnaryExpression tail:(_ MultiplicativeOperator _ UnaryExpression)*
+    { return buildBinaryExpression(head, tail); }
+
+MultiplicativeOperator
+  = $("*" !"=")
+  / $("/" !"=")
+  / $("%" !"=")
 
 UnaryExpression
   = PostfixExpression
-  / _ op: ("++" / "--") _ arg:(UnaryExpression) {
-     return {type: 'UpdateExpression', operator: op, argument: arg, prefix: true};
-    }
-  / _ op: ("-" / "+" / "!" / "~") _ arg:(UnaryExpression) {
-      return {type: 'UnaryExpression', operator: op, argument: arg};
+  / operator:UnaryOperator _ argument:UnaryExpression {
+      var type = (operator === "++" || operator === "--")
+        ? "UpdateExpression"
+        : "UnaryExpression";
+
+      return {
+        type: type,
+        operator: operator,
+        argument: argument,
+        prefix: true
+      };
     }
 
+UnaryOperator
+  = $("+" !"=")
+  / $("-" !"=")
+  / "~"
+  / "!"
+
 PostfixExpression
-  = arg:LeftHandSideExpression _ op:("++" / "--") {
-     return {type: 'UpdateExpression', operator: op, argument: arg, prefix: false};
+  = argument:LeftHandSideExpression _ operator:PostfixOperator {
+      return {
+        type: "UpdateExpression",
+        operator: operator,
+        argument: argument,
+        prefix: false
+      };
     }
   / LeftHandSideExpression
+
+PostfixOperator
+  = "++"
+  / "--"
+
 
 CallExpression
   = head:(_ calee:MemberExpression _ args:Arguments {
@@ -477,46 +506,47 @@ PrimaryExpression
     }
 
 ReservedWord
-  = NullLiteral
+  = Keyword
+  / FutureReservedWord
+  / NullLiteral
   / BooleanLiteral
-  / "break"
-  / "case"
-  / "catch"
-  / "class"
-  / "const"
-  / "continue"
-  / "debugger"
-  / "default"
-  / "delete"
-  / "do"
-  / "else"
-  / "enum"
-  / "export"
-  / "extends"
-  / "false"
-  / "finally"
-  / "for"
-  / "function"
-  / "get"
-  / "if"
-  / "import"
-  / "instanceof"
-  / "in"
-  / "new"
-  / "null"
-  / "return"
-  / "set"
-  / "super"
-  / "switch"
-  / "this"
-  / "throw"
-  / "true"
-  / "try"
-  / "typeof"
-  / "var"
-  / "void"
-  / "while"
-  / "with"
+
+Keyword
+  = BreakToken
+  / CaseToken
+  / CatchToken
+  / ContinueToken
+  / DebuggerToken
+  / DefaultToken
+  / DeleteToken
+  / DoToken
+  / ElseToken
+  / FinallyToken
+  / ForToken
+  / FunctionToken
+  / IfToken
+  / InstanceofToken
+  / InToken
+  / NewToken
+  / ReturnToken
+  / SwitchToken
+  / ThisToken
+  / ThrowToken
+  / TryToken
+  / TypeofToken
+  / VarToken
+  / VoidToken
+  / WhileToken
+  / WithToken
+
+FutureReservedWord
+  = ClassToken
+  / ConstToken
+  / EnumToken
+  / ExportToken
+  / ExtendsToken
+  / ImportToken
+  / SuperToken
 
 Literal
   = BooleanLiteral
@@ -568,7 +598,7 @@ ElementList
     { return Array.prototype.concat.apply(head, tail); }
 
 Elision
-  = "," commas:(_ ",")* { return filledArray(commas.length + 1, undefined); }
+  = "," commas:(_ ",")* { return filledArray(commas.length + 1, null); }
 
 ObjectLiteral
   = "{" _ properties:PropertyAssignmentList _ "}" {
@@ -608,10 +638,23 @@ NullLiteral
     };
   }
 
-Identifier "identifier"
-  = !ReservedWord ([a-zA-Z$_][0-9a-zA-Z$_]*) {
-      return {type: "Identifier", name: text()};
+Identifier
+  = !ReservedWord name:IdentifierName { return name; }
+
+IdentifierName "identifier"
+  = head:IdentifierStart tail:IdentifierPart* {
+      return {
+        type: "Identifier",
+        name: head + tail.join("")
+      };
     }
+
+IdentifierPart
+  = IdentifierStart
+  / [0-9]
+
+IdentifierStart
+  = [a-zA-Z$_]
 
 StringLiteral "string"
   = [\'] val: [^']* [\'] { return {type: 'Literal', value: val.join('')} }
@@ -642,6 +685,46 @@ AssignmentOperator
   / "&="
   / "^="
   / "|="
+
+
+BreakToken      = "break"      !IdentifierPart
+CaseToken       = "case"       !IdentifierPart
+CatchToken      = "catch"      !IdentifierPart
+ClassToken      = "class"      !IdentifierPart
+ConstToken      = "const"      !IdentifierPart
+ContinueToken   = "continue"   !IdentifierPart
+DebuggerToken   = "debugger"   !IdentifierPart
+DefaultToken    = "default"    !IdentifierPart
+DeleteToken     = "delete"     !IdentifierPart
+DoToken         = "do"         !IdentifierPart
+ElseToken       = "else"       !IdentifierPart
+EnumToken       = "enum"       !IdentifierPart
+ExportToken     = "export"     !IdentifierPart
+ExtendsToken    = "extends"    !IdentifierPart
+FalseToken      = "false"      !IdentifierPart
+FinallyToken    = "finally"    !IdentifierPart
+ForToken        = "for"        !IdentifierPart
+FunctionToken   = "function"   !IdentifierPart
+GetToken        = "get"        !IdentifierPart
+IfToken         = "if"         !IdentifierPart
+ImportToken     = "import"     !IdentifierPart
+InstanceofToken = "instanceof" !IdentifierPart
+InToken         = "in"         !IdentifierPart
+NewToken        = "new"        !IdentifierPart
+NullToken       = "null"       !IdentifierPart
+ReturnToken     = "return"     !IdentifierPart
+SetToken        = "set"        !IdentifierPart
+SuperToken      = "super"      !IdentifierPart
+SwitchToken     = "switch"     !IdentifierPart
+ThisToken       = "this"       !IdentifierPart
+ThrowToken      = "throw"      !IdentifierPart
+TrueToken       = "true"       !IdentifierPart
+TryToken        = "try"        !IdentifierPart
+TypeofToken     = "typeof"     !IdentifierPart
+VarToken        = "var"        !IdentifierPart
+VoidToken       = "void"       !IdentifierPart
+WhileToken      = "while"      !IdentifierPart
+WithToken       = "with"       !IdentifierPart
 
 _
   = (WhiteSpace / LineTerminatorSequence)*
