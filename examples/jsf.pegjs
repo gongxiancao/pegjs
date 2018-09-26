@@ -9,6 +9,10 @@
     CallExpression:   "callee",
     MemberExpression: "object",
   };
+  function filledArray(count, value) {
+    return Array.apply(null, new Array(count))
+      .map(function() { return value; });
+  }
 
   function extractOptional(optional, index) {
     return optional ? optional[index] : null;
@@ -74,14 +78,14 @@ SourceElement
     }
 
 Statement
- = Block
- / VariableStatement
- / ExpressionStatement
- / IfStatement
- / IterationStatement
- / ContinueStatement
- / BreakStatement
- / ReturnStatement
+  = Block
+  / VariableStatement
+  / ExpressionStatement
+  / IfStatement
+  / IterationStatement
+  / ContinueStatement
+  / BreakStatement
+  / ReturnStatement
 
 Block
   = "{" _ body:(StatementList _)? "}" {
@@ -147,7 +151,7 @@ IfStatement
     }
 
 IterationStatement
- = "for" _
+  = "for" _
     "(" _
     init:(Expression _)? ";" _
     test:(Expression _)? ";" _
@@ -163,7 +167,7 @@ IterationStatement
         body: body
       };
     }
- / "for" _
+  / "for" _
     "(" _
     kind:("let" / "var") _ declarations:VariableDeclarationList _ ";" _
     test:(Expression _)? ";" _
@@ -216,10 +220,9 @@ ExpressionStatement
 
 Expression
   = head:AssignmentExpression tail:(_ "," _ AssignmentExpression)* {
-      return tail.reduce(function(result, element) {
-        result.push(element[1]);
-        return result;
-      }, [head]);
+      return tail.length > 0
+        ? { type: "SequenceExpression", expressions: buildList(head, tail, 3) }
+        : head;
     }
 
 AssignmentExpression
@@ -426,11 +429,8 @@ MemberExpression
     }
 
 Arguments
-  = _ "(" _ args:(ArgumentList) _ ")" {
-      return args;
-    }
-  / _ "(" _ ")" {
-      return [];
+  = _ "(" _ args:(ArgumentList _)? ")" {
+      return optionalList(extractOptional(args, 0));
     }
 
 Index
@@ -445,11 +445,8 @@ Index
     }
 
 ArgumentList
-  = _ head: Expression tail:(_ "," _ Expression)* {
-      return tail.reduce(function(result, element) {
-        result.push(element[3]);
-        return result;
-      }, [head]);
+  = head:AssignmentExpression tail:(_ "," _ AssignmentExpression)* {
+      return buildList(head, tail, 3);
     }
 
 PropertyAssignment
@@ -538,19 +535,40 @@ Property "property"
     }
 
 ArrayLiteral
-  = "[" _ args:ArgumentList _ "]" {
+  = "[" _ elision:(Elision _)? "]" {
       return {
         type: "ArrayExpression",
-        elements: args
+        elements: optionalList(extractOptional(elision, 0))
       };
     }
-  / "[" _ "]" {
+  / "[" _ elements:ElementList _ "]" {
       return {
         type: "ArrayExpression",
-        elements: []
+        elements: elements
+      };
+    }
+  / "[" _ elements:ElementList _ "," _ elision:(Elision _)? "]" {
+      return {
+        type: "ArrayExpression",
+        elements: elements.concat(optionalList(extractOptional(elision, 0)))
       };
     }
 
+ElementList
+  = head:(
+      elision:(Elision _)? element:AssignmentExpression {
+        return optionalList(extractOptional(elision, 0)).concat(element);
+      }
+    )
+    tail:(
+      _ "," _ elision:(Elision _)? element:AssignmentExpression {
+        return optionalList(extractOptional(elision, 0)).concat(element);
+      }
+    )*
+    { return Array.prototype.concat.apply(head, tail); }
+
+Elision
+  = "," commas:(_ ",")* { return filledArray(commas.length + 1, undefined); }
 
 ObjectLiteral
   = "{" _ properties:PropertyAssignmentList _ "}" {
