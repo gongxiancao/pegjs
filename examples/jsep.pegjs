@@ -9,19 +9,62 @@
     CallExpression:   "callee",
     MemberExpression: "object",
   };
+
+  function filledArray(count, value) {
+    return Array.apply(null, new Array(count))
+      .map(function() { return value; });
+  }
+
+  function extractOptional(optional, index) {
+    return optional ? optional[index] : null;
+  }
+
+  function extractList(list, index) {
+    return list.map(function(element) { return element[index]; });
+  }
+
+  function buildList(head, tail, index) {
+    return [head].concat(extractList(tail, index));
+  }
+
+  function optionalList(value) {
+    return value !== null ? value : [];
+  }
+
+  function buildLogicalExpression(head, tail) {
+    return tail.reduce(function(result, element) {
+      return {
+        type: "LogicalExpression",
+        operator: element[1],
+        left: result,
+        right: element[3]
+      };
+    }, head);
+  }
+
+  function buildBinaryExpression(head, tail) {
+    return tail.reduce(function(result, element) {
+      return {
+        type: "BinaryExpression",
+        operator: element[1],
+        left: result,
+        right: element[3]
+      };
+    }, head);
+  }
 }
 
 Start
- = _ ep:Expression _ {
-     return ep;
-   }
+  = _ ep:Expression _ {
+      return ep;
+    }
 
 
 Expression
   = ConditionalExpression
 
 ConditionalExpression
-  = test:LogicalExpression _
+  = test:LogicalORExpression _
     "?" _ consequent:Expression _
     ":" _ alternate:Expression
     {
@@ -32,56 +75,112 @@ ConditionalExpression
         alternate: alternate
       };
     }
-  / LogicalExpression
+  / LogicalORExpression
 
-LogicalExpression
-  = head:BitwiseExpression tail:(_ ("&&" / "||") _ BitwiseExpression)* {
-      return tail.reduce(function(result, element) {
-        return {type: 'LogicalExpression', operator: element[1], left: result, right: element[3]};
-      }, head);
-    }
+LogicalORExpression
+  = head:LogicalANDExpression
+    tail:(_ LogicalOROperator _ LogicalANDExpression)*
+    { return buildLogicalExpression(head, tail); }
 
-BitwiseExpression
-  = head:RelationalExpression tail:(_ ("&" / "|" / "^") _ RelationalExpression)* {
-      return tail.reduce(function(result, element) {
-        return {type: 'BinaryExpression', operator: element[1], left: result, right: element[3]};
-      }, head);
-    }
+LogicalOROperator
+  = "||"
+
+LogicalANDExpression
+  = head:BitwiseORExpression
+    tail:(_ LogicalANDOperator _ BitwiseORExpression)*
+    { return buildLogicalExpression(head, tail); }
+
+LogicalANDOperator
+  = "&&"
+
+BitwiseORExpression
+  = head:BitwiseXORExpression
+    tail:(_ BitwiseOROperator _ BitwiseXORExpression)*
+    { return buildBinaryExpression(head, tail); }
+
+BitwiseOROperator
+  = $("|" ![|=])
+
+BitwiseXORExpression
+  = head:BitwiseANDExpression
+    tail:(_ BitwiseXOROperator _ BitwiseANDExpression)*
+    { return buildBinaryExpression(head, tail); }
+
+BitwiseXOROperator
+  = $("^" !"=")
+
+BitwiseANDExpression
+  = head:EqualityExpression
+    tail:(_ BitwiseANDOperator _ EqualityExpression)*
+    { return buildBinaryExpression(head, tail); }
+
+BitwiseANDOperator
+  = $("&" ![&=])
+
+EqualityExpression
+  = head:RelationalExpression
+    tail:(_ EqualityOperator _ RelationalExpression)*
+    { return buildBinaryExpression(head, tail); }
+
+EqualityOperator
+  = "==="
+  / "!=="
+  / "=="
+  / "!="
 
 RelationalExpression
-  = head:ShiftExpression tail:(_ (">=" / "<=" / ">" / "<" / "===" / "!==") _ ShiftExpression)* {
-      return tail.reduce(function(result, element) {
-        return {type: 'BinaryExpression', operator: element[1], left: result, right: element[3]};
-      }, head);
-    }
+  = head:ShiftExpression tail:(_ RelationalOperator _ ShiftExpression)*
+    { return buildBinaryExpression(head, tail); }
+
+RelationalOperator
+  = "<="
+  / ">="
+  / $("<" !"<")
+  / $(">" !">")
 
 ShiftExpression
-  = head:AdditiveExpression tail:(_ ("<<" / ">>>" / ">>") _ AdditiveExpression)* {
-      return tail.reduce(function(result, element) {
-        return {type: 'BinaryExpression', operator: element[1], left: result, right: element[3]};
-      }, head);
-    }
+  = head:AdditiveExpression tail:(_ ShiftOperator _ AdditiveExpression)*
+    { return buildBinaryExpression(head, tail); }
+
+ShiftOperator
+  = $("<<"  !"=")
+  / $(">>>" !"=")
+  / $(">>"  !"=")
 
 AdditiveExpression
-  = head:MultiplicativeExpression tail:(_ ("+" / "-") _ MultiplicativeExpression)* {
-      return tail.reduce(function(result, element) {
-        return {type: 'BinaryExpression', operator: element[1], left: result, right: element[3]};
-      }, head);
-    }
+  = head:MultiplicativeExpression tail:(_ AdditiveOperator _ MultiplicativeExpression)*
+    { return buildBinaryExpression(head, tail); }
+
+AdditiveOperator
+  = $("+" ![+=])
+  / $("-" ![-=])
 
 MultiplicativeExpression
-  = head:UnaryExpression tail:(_ ("*" / "/" / "%") _ UnaryExpression)* {
-      return tail.reduce(function(result, element) {
-        return {type: 'BinaryExpression', operator: element[1], left: result, right: element[3]};
-      }, head);
-    }
+  = head:UnaryExpression tail:(_ MultiplicativeOperator _ UnaryExpression)*
+    { return buildBinaryExpression(head, tail); }
+
+MultiplicativeOperator
+  = $("*" !"=")
+  / $("/" !"=")
+  / $("%" !"=")
 
 UnaryExpression
   = CallExpression
   / NewExpression
-  / _ op: ("-" / "+" / "!" / "~") _ arg:(UnaryExpression) {
-      return {type: 'UnaryExpression', operator: op, argument: arg};
+  / operator:UnaryOperator _ argument:UnaryExpression {
+      return {
+        type: 'UnaryExpression',
+        operator: operator,
+        argument: argument,
+        prefix: true
+      };
     }
+
+UnaryOperator
+  = $("+" !"=")
+  / $("-" !"=")
+  / "~"
+  / "!"
 
 CallExpression
   = head:(_ calee:MemberExpression _ args:Arguments {
@@ -149,11 +248,8 @@ MemberExpression
     }
 
 Arguments
-  = _ "(" _ args:(ArgumentList) _ ")" {
-      return args;
-    }
-  / _ "(" _ ")" {
-      return [];
+  = _ "(" _ args:(ArgumentList _)? ")" {
+      return optionalList(extractOptional(args, 0));
     }
 
 Index
@@ -168,11 +264,8 @@ Index
     }
 
 ArgumentList
-  = _ head: Expression tail:(_ "," _ Expression)* {
-      return tail.reduce(function(result, element) {
-        result.push(element[3]);
-        return result;
-      }, [head]);
+  = head:Expression tail:(_ "," _ Expression)* {
+      return buildList(head, tail, 3);
     }
 
 PropertyAssignment
@@ -203,9 +296,47 @@ PrimaryExpression
     }
 
 ReservedWord
-  = NullLiteral
+  = Keyword
+  / FutureReservedWord
+  / NullLiteral
   / BooleanLiteral
-  / "new"
+
+Keyword
+  = BreakToken
+  / CaseToken
+  / CatchToken
+  / ContinueToken
+  / DebuggerToken
+  / DefaultToken
+  / DeleteToken
+  / DoToken
+  / ElseToken
+  / FinallyToken
+  / ForToken
+  / FunctionToken
+  / IfToken
+  / InstanceofToken
+  / InToken
+  / NewToken
+  / ReturnToken
+  / SwitchToken
+  / ThisToken
+  / ThrowToken
+  / TryToken
+  / TypeofToken
+  / VarToken
+  / VoidToken
+  / WhileToken
+  / WithToken
+
+FutureReservedWord
+  = ClassToken
+  / ConstToken
+  / EnumToken
+  / ExportToken
+  / ExtendsToken
+  / ImportToken
+  / SuperToken
 
 Literal
   = BooleanLiteral
@@ -224,19 +355,40 @@ Property "property"
     }
 
 ArrayLiteral
-  = "[" _ args:ArgumentList _ "]" {
+  = "[" _ elision:(Elision _)? "]" {
       return {
         type: "ArrayExpression",
-        elements: args
+        elements: optionalList(extractOptional(elision, 0))
       };
     }
-  / "[" _ "]" {
+  / "[" _ elements:ElementList _ "]" {
       return {
         type: "ArrayExpression",
-        elements: []
+        elements: elements
+      };
+    }
+  / "[" _ elements:ElementList _ "," _ elision:(Elision _)? "]" {
+      return {
+        type: "ArrayExpression",
+        elements: elements.concat(optionalList(extractOptional(elision, 0)))
       };
     }
 
+ElementList
+  = head:(
+      elision:(Elision _)? element:Expression {
+        return optionalList(extractOptional(elision, 0)).concat(element);
+      }
+    )
+    tail:(
+      _ "," _ elision:(Elision _)? element:Expression {
+        return optionalList(extractOptional(elision, 0)).concat(element);
+      }
+    )*
+    { return Array.prototype.concat.apply(head, tail); }
+
+Elision
+  = "," commas:(_ ",")* { return filledArray(commas.length + 1, null); }
 
 ObjectLiteral
   = "{" _ properties:PropertyAssignmentList _ "}" {
@@ -276,10 +428,25 @@ NullLiteral
     };
   }
 
-Identifier "identifier"
-  = !ReservedWord ([a-zA-Z$_][0-9a-zA-Z$_]*) {
-      return {type: "Identifier", name: text()};
+Identifier
+  = !ReservedWord name:IdentifierName { return name; }
+
+IdentifierName "identifier"
+  = head:IdentifierStart tail:IdentifierPart* {
+      return {
+        type: "Identifier",
+        name: head + tail.join("")
+      };
     }
+
+
+IdentifierPart
+  = IdentifierStart
+  / [0-9]
+
+IdentifierStart
+  = [a-zA-Z$_]
+
 
 StringLiteral "string"
   = [\'] val: [^']* [\'] { return {type: 'Literal', value: val.join('')} }
@@ -299,5 +466,57 @@ NumericLiteral "number"
   / [1-9][0-9]* { return {type: 'Literal', value: parseInt(text(), 10)}; }
 
 
-_ "whitespace"
-  = [ \t\n\r]*
+BreakToken      = "break"      !IdentifierPart
+CaseToken       = "case"       !IdentifierPart
+CatchToken      = "catch"      !IdentifierPart
+ClassToken      = "class"      !IdentifierPart
+ConstToken      = "const"      !IdentifierPart
+ContinueToken   = "continue"   !IdentifierPart
+DebuggerToken   = "debugger"   !IdentifierPart
+DefaultToken    = "default"    !IdentifierPart
+DeleteToken     = "delete"     !IdentifierPart
+DoToken         = "do"         !IdentifierPart
+ElseToken       = "else"       !IdentifierPart
+EnumToken       = "enum"       !IdentifierPart
+ExportToken     = "export"     !IdentifierPart
+ExtendsToken    = "extends"    !IdentifierPart
+FalseToken      = "false"      !IdentifierPart
+FinallyToken    = "finally"    !IdentifierPart
+ForToken        = "for"        !IdentifierPart
+FunctionToken   = "function"   !IdentifierPart
+GetToken        = "get"        !IdentifierPart
+IfToken         = "if"         !IdentifierPart
+ImportToken     = "import"     !IdentifierPart
+InstanceofToken = "instanceof" !IdentifierPart
+InToken         = "in"         !IdentifierPart
+NewToken        = "new"        !IdentifierPart
+NullToken       = "null"       !IdentifierPart
+ReturnToken     = "return"     !IdentifierPart
+SetToken        = "set"        !IdentifierPart
+SuperToken      = "super"      !IdentifierPart
+SwitchToken     = "switch"     !IdentifierPart
+ThisToken       = "this"       !IdentifierPart
+ThrowToken      = "throw"      !IdentifierPart
+TrueToken       = "true"       !IdentifierPart
+TryToken        = "try"        !IdentifierPart
+TypeofToken     = "typeof"     !IdentifierPart
+VarToken        = "var"        !IdentifierPart
+VoidToken       = "void"       !IdentifierPart
+WhileToken      = "while"      !IdentifierPart
+WithToken       = "with"       !IdentifierPart
+
+
+_
+  = (WhiteSpace / LineTerminatorSequence)*
+
+WhiteSpace "whitespace"
+  = "\t"
+  / "\v"
+  / "\f"
+  / " "
+
+LineTerminatorSequence "end of line"
+  = "\n"
+  / "\r\n"
+  / "\r"
+
