@@ -439,14 +439,12 @@ IdentifierName "identifier"
       };
     }
 
-
 IdentifierPart
   = IdentifierStart
   / [0-9]
 
 IdentifierStart
   = [a-zA-Z$_]
-
 
 StringLiteral "string"
   = [\'] val: [^']* [\'] { return {type: 'Literal', value: val.join('')} }
@@ -504,7 +502,6 @@ VarToken        = "var"        !IdentifierPart
 VoidToken       = "void"       !IdentifierPart
 WhileToken      = "while"      !IdentifierPart
 WithToken       = "with"       !IdentifierPart
-
 
 _
   = (WhiteSpace / LineTerminatorSequence)*
